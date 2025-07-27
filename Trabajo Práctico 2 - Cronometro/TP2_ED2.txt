@@ -1,0 +1,163 @@
+LIST P=16F887
+    #include <p16f887.inc> 
+   
+   __CONFIG _CONFIG1, _FOSC_INTRC_NOCLKOUT & _WDTE_OFF & _MCLRE_ON & _LVP_OFF
+
+ORG 0x00
+    GOTO MAIN 
+ORG 0x04
+    GOTO ISR
+    
+CD0 EQU 0X20
+CD1 EQU 0X21
+CD2 EQU 0X22
+CD3 EQU 0X23
+CONT EQU 0X24
+status_temp EQU 0X25
+w_temp EQU 0X26
+
+    
+ MAIN
+    BANKSEL TRISA
+    CLRF TRISA ; CONFIGURO -PORT A- COMO SALIDAS
+    MOVLW 0XF0
+    MOVWF TRISB ; CONFIGURO -RB0-RB1-RB2-RB3- COMO SALIDAS
+    MOVLW B'11010111'
+    MOVWF OPTION_REG ; TMR0 con clk interno en flanco de bajada, con prescaler
+		     ; al máximo 
+    MOVLW B'10100000'
+    MOVWF INTCON     ; Activa solo las int por TMR0, y baja las flags
+    
+    ;---------------------
+    BANKSEL TMR0
+    MOVLW .59       ; carga inicial de TMR0
+    MOVWF TMR0
+    ;---------------------
+    
+    BANKSEL PORTA ;
+    CLRF CD0
+    CLRF CD1
+    CLRF CD2
+    CLRF CD3
+    CLRF PORTB
+    
+    
+ INICIO
+ ;------------------------digito_0
+    BSF PORTB,RB0
+    MOVF CD0,W
+    CALL TABLA
+    MOVWF PORTA
+    CALL DELAY
+    BCF PORTB,RB0
+ ;------------------------digito_1
+    BSF PORTB,RB1
+    MOVF CD1,W
+    CALL TABLA
+    MOVWF PORTA
+    CALL DELAY
+    BCF PORTB,RB1
+ ;------------------------digito_2
+    BSF PORTB,RB2
+    MOVF CD2,W
+    CALL TABLA
+    MOVWF PORTA
+    CALL DELAY
+    BCF PORTB,RB2
+ ;------------------------digito_3
+    BSF PORTB,RB3
+    MOVF CD3,W
+    CALL TABLA
+    MOVWF PORTA
+    CALL DELAY
+    BCF PORTB,RB3
+    
+    GOTO INICIO
+    
+ DELAY ; TIEMPO DE ESPERA DE 4,992 mS PARA QUE X4=19,968 mS OSEA f=50,08 Hz  
+	BANKSEL PORTA
+	MOVLW .24
+	MOVWF 0X30
+T2	MOVLW .68
+	MOVWF 0X31
+T1	DECFSZ 0X31,F
+	GOTO T1
+	DECFSZ 0X30,F
+	GOTO T2
+    RETURN 
+    
+  TABLA
+    ADDWF PCL,F
+    RETLW B'0111111' ; 0
+    RETLW B'0000110' ; 1
+    RETLW B'1011011' ; 2 
+    RETLW B'1001111' ; 3  
+    RETLW B'1100110' ; 4  
+    RETLW B'1101101' ; 5  
+    RETLW B'1111101' ; 6   
+    RETLW B'0000111' ; 7   
+    RETLW B'1111111' ; 8  
+    RETLW B'1100111' ; 9  
+    
+ISR ; RUTINA PARA LAS INTERRUPCIONES
+    MOVWF w_temp         ; GUARDO CONTEXTO
+    SWAPF STATUS, W
+    MOVWF status_temp
+    
+   ;----------------------------
+   BANKSEL INTCON
+   BTFSS INTCON,2   ;VERIFICO LA BANDERA
+   GOTO VOLVER
+   BCF INTCON,2 ; BAJO LA BANDERA
+   BANKSEL PORTA 
+   
+   INCF CONT,F
+   MOVLW .20
+   SUBWF CONT,W
+   BTFSS STATUS, Z
+   GOTO VOLVER
+   
+   CLRF CONT
+   
+    INCF CD0,F
+   MOVLW .10
+   SUBWF CD0,W
+   BTFSS STATUS,Z
+   GOTO VOLVER
+   CLRF CD0
+   
+    INCF CD1,F
+   MOVLW .6
+   SUBWF CD1,W
+   BTFSS STATUS,Z
+   GOTO VOLVER
+   CLRF CD1
+   
+    INCF CD2,F
+   MOVLW .10
+   SUBWF CD2,W
+   BTFSS STATUS,Z
+   GOTO VOLVER
+   CLRF CD2
+   
+    INCF CD3,F
+   MOVLW .6
+   SUBWF CD3,W
+   BTFSS STATUS,Z
+   GOTO VOLVER
+   CLRF CD3
+   
+   GOTO VOLVER
+   
+VOLVER
+    BANKSEL TMR0
+    MOVLW .59
+    MOVWF TMR0
+    BANKSEL PORTA
+    ;-------------------- Restaurar contexto
+    SWAPF status_temp, W
+    MOVWF STATUS
+    MOVF w_temp, W
+    RETFIE
+    
+    END

@@ -1,0 +1,4 @@
+En este Trabajo Práctico, se realizó el conexionado de teclas de una guitarra de juguete para PlayStation 2 del famoso juego Guitar Hero para poder darle una nueva vida a la guitarra. 
+
+Para ello se consiguio una guitarra de juguete donde se tomo solo la circuiteria respectiva a los botones para luego realizar el proceso de mapeo en el microcontrolador PIC16F887 en lenguaje Assembler (vease el código en formato .txt) el cual se encarga de recibir la pulsación de una tecla de botón y asignarle una letra correspondiente a la tabla ASCII y esta era enviada mediante el puerto serie del controlador mediante el protocolo SERIE RS232.
+Una vez recibida la información, esta era procesada por un codigo de Python la cual la convierte a protocolo USB y mediante este generaba la pulsación de ciertas teclas permitiendo así que los pulsadores se comuniquen con la computadora y sea posible jugar al Guitar Hero.

@@ -1,0 +1,45 @@
+; Electronica Digital 2 - Trabajo practico 1
+; Integrantes: Marchisio, Mendes Rosa, Monja
+
+LIST P=16F887
+#include "p16f887.inc"   
+__CONFIG _CONFIG1, _FOSC_INTRC_NOCLKOUT & _WDTE_OFF & _MCLRE_ON & _LVP_OFF
+	
+	ORG 0X00
+	GOTO MAIN
+    
+	ORG 0X5
+MAIN
+	BCF STATUS,RP1 
+	BSF STATUS,RP0  ; Accede a banco 1
+	BCF TRISA,0     ; Configura el pin como salida
+	BCF STATUS,RP0  ; Regresa a banco 0
+
+	
+BUCLE
+	BSF PORTA, 0
+	CALL RETARDO
+	BCF PORTA, 0
+	CALL RETARDO
+	GOTO BUCLE
+		
+RETARDO	
+  MOVLW .255
+   MOVWF 0x20
+A1:
+    MOVLW .255
+    MOVWF 0x21
+A2: 
+    MOVLW .1
+    MOVWF 0x22
+A3: 
+    DECFSZ 0x22, F
+    GOTO A3
+    DECFSZ 0x21, F
+    GOTO A2
+    DECFSZ 0x20, F
+    GOTO A1
+    
+    RETURN
+
+END

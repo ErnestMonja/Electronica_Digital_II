@@ -1,0 +1,246 @@
+LIST P=16F887
+#include <p16f887.inc>
+
+__CONFIG _CONFIG1, _FOSC_INTRC_NOCLKOUT & _WDTE_OFF & _MCLRE_ON & _LVP_OFF
+
+RET1 EQU 0x20
+RET2 EQU 0x21
+RET3 EQU 0x22
+RB_ANTES EQU 0x23
+AUX EQU 0x24
+CONT_0 EQU 0x25
+MASK EQU 0x26
+VIBRATO_ACTIVO EQU 0x27 ; 0 = No activo, 1 = Activo
+TEMP EQU 0X28
+
+ORG 0x00
+    GOTO MAIN
+ORG 0x04
+    GOTO ISR
+
+MAIN
+    ; PINES de PORTA y PORTB
+    BANKSEL TRISB
+    MOVLW 0xFF
+    MOVWF TRISB		; PORTB como entradas (para botones)
+    MOVWF IOCB		; Habilitar interrupción por cambio en PORTB
+    
+    BANKSEL TRISA
+    MOVLW B'00000001'	; Solo RA0 como entrada
+    MOVWF TRISA
+
+    BANKSEL ANSEL
+    MOVLW B'00000001'	; AN0 como entrada analógica, resto digitales
+    MOVWF ANSEL
+    CLRF ANSELH		; AN8-AN13 digitales
+
+    ; Transmisión Serie
+    BANKSEL SPBRG
+    MOVLW .25		; 9600 baudios con 4MHz
+    MOVWF SPBRG
+    MOVLW B'00100100'	; TXEN = 1 (Transmit Enable), BRGH = 1 (High Baud Rate)
+    MOVWF TXSTA
+    BANKSEL RCSTA
+    MOVLW B'10000000'	; SPEN = 1 (Serial Port Enable)
+    MOVWF RCSTA
+
+    ; ADC
+    BANKSEL ADCON0
+    MOVLW B'01000001'	; ADON=1 (ADC On), CHS=0000 (Canal AN0), CLK en FOSC/8
+    MOVWF ADCON0
+    BANKSEL ADCON1
+    CLRF ADCON1		; Refs en VDD y VSS, y los LSB en ADRESL
+
+    ; Interrupciones y option_reg
+    MOVLW B'00000111'	; OPTION_REG: Pull-ups activados, TMR0 Prescaler 1:256
+    MOVWF OPTION_REG
+    
+    BANKSEL WPUB
+    MOVLW B'11111111'
+    MOVWF WPUB		; TODAS LAS PULLUPS ACTIVADAS
+
+    BANKSEL INTCON
+    CLRF INTCON
+    MOVLW B'11101000'	; Habilito todas menos cambio de flanco de RB0
+    MOVWF INTCON
+
+    BANKSEL PIR1
+    CLRF PIR1		; Limpio flags de interrupción de ADC y TX
+    
+    BANKSEL PIE1
+    CLRF PIE1		; Limpio flags y enables externos
+    BSF PIE1, 6		; Habilito interrupción por ADC
+    
+    BANKSEL TMR0
+    CLRF TMR0
+    
+    BANKSEL PORTA
+    CLRF VIBRATO_ACTIVO ; Inicializa vibrato como no activo
+    MOVLW 0xFF          ; Estado inicial de PORTB para la detección de cambios
+    MOVWF RB_ANTES
+
+LOOP
+    GOTO LOOP		; El PIC se queda esperando interrupciones
+
+ISR
+    BTFSC INTCON, T0IF  ; ¿Es interrupción de Timer0?
+    GOTO TMR0_ISR
+    BANKSEL PIR1
+    BTFSC PIR1, 6	; ¿Es interrupción del ADC?
+    GOTO ADC_ISR
+    BTFSC INTCON, RBIF  ; ¿Es interrupción de cambio en PORTB?
+    GOTO RB_ISR
+    RETFIE              ; Sino vuelvo
+
+TMR0_ISR		; Cada que interrumpe TMR0 comienza a convertir el ADC
+    
+    BCF INTCON, T0IF    ; Borra el flag de interrupción de TMR0
+    BANKSEL ADCON0
+    BSF ADCON0, 1	; Inicia la conversión del ADC
+    RETFIE
+
+    
+ADC_ISR ; Cada que termina la conversión, compara y maneja el vibrato
+    BANKSEL PIR1
+    BCF PIR1, ADIF      ; Borra el flag de interrupción del ADC
+    BANKSEL ADRESH      
+    MOVLW .120          ; Umbral para el vibrato
+    SUBWF ADRESH, W     ; Compara ADRESH con 120
+                        ; Si ADRESH >= 120, C=1
+                        ; Si ADRESH < 120, C=0
+
+    BTFSC STATUS, C	    ; Si C=1, vibrato debería estar activado
+    GOTO CHECK_VIBRATO_ON
+			    ; Sino, el vibrato debe estar desactivado
+    MOVF VIBRATO_ACTIVO, F
+    BTFSC STATUS, Z	    ; Me fijo si el vibrato estaba en 0
+    RETFIE		    ; Si VIBRATO_ACTIVO ya era 0, no hacer nada
+
+			    ; Si el vibrato estaba activado, lo desactivo
+    CLRF VIBRATO_ACTIVO	    ; Pone VIBRATO_ACTIVO a 0
+    MOVLW 'v'		    ; Carácter para desactivar vibrato
+    CALL ENVIAR		    ; Envía 'v'
+    RETFIE
+
+CHECK_VIBRATO_ON	    ; Quiero el vibrato activado
+    MOVF VIBRATO_ACTIVO, F
+    BTFSS STATUS, Z	    ; Chequeo el valor del vibrato
+    RETFIE		    ; Si Z=0, ya estaba ON, vuelvo. Sino:
+    
+    BSF VIBRATO_ACTIVO, 0   ; Pone VIBRATO_ACTIVO a 1
+    MOVLW 'u'		    ; Carácter para activar vibrato
+    CALL ENVIAR		    ; Envía 'u'
+    RETFIE
+
+RB_ISR
+    BCF INTCON, RBIF    ; Baja la bandera de interrupción de PortB
+    CALL DELAY          ; Delay para anti-rebote
+
+    BANKSEL PORTA
+    MOVF RB_ANTES, W
+    XORWF PORTB, W	; Detecta cambios y los deja en 1
+    MOVWF AUX           ; AUX ahora contiene los bits que cambiaron de estado
+    MOVF PORTB, W
+    MOVWF RB_ANTES      ; Actualiza RB_ANTES con el estado actual de PORTB
+
+    CLRF CONT_0         ; Inicia el contador de bits en 0
+    BCF STATUS, C       ; Limpia el carry para la primera rotación
+
+LOOP_CAMBIOS
+    BANKSEL PORTA
+    MOVF AUX, F
+    BTFSC STATUS, Z     ; Si AUX es 0, no hay más bits cambiados
+    RETFIE              ; Vuelvo
+
+    RRF AUX, F          ; Rota el bit menos significativo de AUX a C
+    BTFSS STATUS, C     ; Si C=0, este bit no cambió
+    GOTO SIGUIENTE_BIT  ; Ir a chequear el siguiente bit
+
+    MOVF PORTB, W       ; Leer el estado actual de PORTB
+    MOVWF TEMP          ; Guardar temporalmente PORTB
+
+    MOVF CONT_0, W
+    CALL MASKTAB        ; Obtener la máscara para el bit actual (0-7)
+    MOVWF MASK          ; Guardar la máscara
+
+    MOVF TEMP, W        ; Recuperar el estado de PORTB
+    ANDWF MASK, W       ; Aislar el bit que cambió
+    BTFSS STATUS, Z     ; Si Z=1, el bit está en 0 (PRESIONADO)
+    GOTO LIBERAR_BIT_RB ; Si Z=0, el bit está en 1 (LIBERADO)
+
+PRESIONAR_BIT_RB
+    MOVF CONT_0, W
+    CALL TABLA_PRESIONAR ; Obtener el carácter de 'presionar'
+    CALL ENVIAR          ; Enviar el carácter
+    GOTO SIGUIENTE_BIT
+
+LIBERAR_BIT_RB
+    MOVF CONT_0, W
+    CALL TABLA_LIBERAR   ; Obtener el carácter de 'liberar'
+    CALL ENVIAR          ; Enviar el carácter
+    GOTO SIGUIENTE_BIT
+    
+SIGUIENTE_BIT
+    INCF CONT_0         ; Incrementa el contador de bits
+    MOVLW .8            ; Chequea hasta 8 bits (RB0 a RB7)
+    SUBWF CONT_0, W
+    BTFSS STATUS, Z     ; Si CONT_0 no ha llegado a 8, sigue
+    GOTO LOOP_CAMBIOS   ; Continuar buscando más cambios
+    RETFIE
+    
+ENVIAR
+    BANKSEL PIR1
+    BTFSS PIR1, TXIF    ; Espera hasta que el buffer de transmisión esté vacío
+    GOTO ENVIAR
+    MOVWF TXREG         ; Envía el carácter seleccionado
+    RETURN
+
+DELAY ; 2mS
+    MOVLW .8
+    MOVWF RET1
+D1  MOVLW .250
+    MOVWF RET2
+D2  MOVLW .1
+    MOVWF RET3
+D3  DECFSZ RET3, F
+    GOTO D3
+    DECFSZ RET2, F
+    GOTO D2
+    DECFSZ RET1, F
+    GOTO D1
+    RETURN
+
+MASKTAB ; Devuelve la máscara para el bit en W (0-7)
+    ADDWF PCL, F
+    RETLW b'00000001'   ; 0 (RB0)
+    RETLW b'00000010'   ; 1 (RB1)
+    RETLW b'00000100'   ; 2 (RB2)
+    RETLW b'00001000'   ; 3 (RB3)
+    RETLW b'00010000'   ; 4 (RB4)
+    RETLW b'00100000'   ; 5 (RB5)
+    RETLW b'01000000'   ; 6 (RB6)
+    RETLW b'10000000'   ; 7 (RB7)
+
+TABLA_PRESIONAR ; Devuelve el carácter a enviar cuando un botón se presiona
+    ADDWF PCL, F
+    RETLW 'a'   ; RB0 - Verde
+    RETLW 'b'   ; RB1 - Rojo
+    RETLW 'c'   ; RB2 - Amarillo
+    RETLW 'd'   ; RB3 - Azul
+    RETLW 'e'   ; RB4 - Naranja
+    RETLW 'f'   ; RB5 - Flecha arriba (Rasgueo)
+    RETLW 'g'   ; RB6 - Flecha abajo (Rasgueo)
+    RETLW 'h'   ; RB7 - Select (poder)
+
+TABLA_LIBERAR ; Devuelve el carácter a enviar cuando un botón se libera
+    ADDWF PCL, F
+    RETLW 'i'   ; RB0 - Verde
+    RETLW 'j'   ; RB1 - Rojo
+    RETLW 'k'   ; RB2 - Amarillo
+    RETLW 'l'   ; RB3 - Azul
+    RETLW 'm'   ; RB4 - Naranja
+    RETLW 'n'   ; RB5 - Flecha arriba (Rasgueo)
+    RETLW 'o'   ; RB6 - Flecha abajo (Rasgueo)
+    RETLW 'p'   ; RB7 - Select (poder)
+
+END
